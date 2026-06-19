@@ -1,10 +1,10 @@
 import { BrowserRouter, Routes, Route, Link, Navigate } from 'react-router-dom';
 import GestionUsuarios from './pages/GestionUsuarios';
+import GestionCotizaciones from './pages/GestionCotizaciones'; // <-- Importamos la nueva página
 import Login from './pages/Login';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 // --- 1. GUARDIA DE SEGURIDAD (Rutas Protegidas) ---
-// Verifica si hay sesión, si no, te patea al Login
 const RutaProtegida = ({ children }: { children: React.ReactNode }) => {
   const { usuarioActual } = useAuth();
   
@@ -19,20 +19,24 @@ const RutaProtegida = ({ children }: { children: React.ReactNode }) => {
 const NavBar = () => {
   const { usuarioActual, logout } = useAuth();
 
-  // Si no hay usuario logueado (ej: estamos en la pantalla de Login), ocultamos la barra
   if (!usuarioActual) return null;
 
   return (
     <nav style={{ padding: '15px', background: '#080a0e', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
       
-      {/* Lado izquierdo: Tu menú original */}
+      {/* Lado izquierdo: Tu menú original actualizado */}
       <div style={{ display: 'flex', gap: '20px' }}>
         <h2 style={{ margin: 0, color: '#ff922d' }}>OBE SPA Intranet</h2>
         <Link to="/" style={{ color: 'white', textDecoration: 'none', alignSelf: 'center' }}>Inicio</Link>
         
-        {/* Validación: Solo un Administrador ve el botón para entrar a la gestión */}
+        {/* Validación: Solo un Administrador ve la gestión de usuarios */}
         {usuarioActual.rol === 'Administrador' && (
           <Link to="/usuarios" style={{ color: 'white', textDecoration: 'none', alignSelf: 'center' }}>Gestión Usuarios</Link>
+        )}
+
+        {/* REQUERIMIENTO: Botón en Navbar para acceder al nuevo módulo de Cotizaciones */}
+        {usuarioActual.rol === 'Administrador' && (
+          <Link to="/cotizaciones" style={{ color: 'white', textDecoration: 'none', alignSelf: 'center' }}>Gestión Cotizaciones</Link>
         )}
       </div>
 
@@ -55,7 +59,6 @@ const NavBar = () => {
 // --- 3. APLICACIÓN PRINCIPAL ---
 function App() {
   return (
-    // Envolvemos todo en el AuthProvider para que el contexto funcione
     <AuthProvider>
       <BrowserRouter>
         <NavBar />
@@ -79,6 +82,15 @@ function App() {
             element={
               <RutaProtegida>
                 <GestionUsuarios />
+              </RutaProtegida>
+            } 
+          />
+          {/* REQUERIMIENTO: Ruta Protegida de la Nueva Sección de Cotizaciones */}
+          <Route 
+            path="/cotizaciones" 
+            element={
+              <RutaProtegida>
+                <GestionCotizaciones />
               </RutaProtegida>
             } 
           />

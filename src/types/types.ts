@@ -33,12 +33,15 @@ export interface Noticia {
 }
 
 // Módulo de Martina (CRUD Cotizaciones)
+
+export type EstadoCotizacion = 'Pendiente' | 'En revisión' | 'Contactado' | 'Finalizado' | 'Cancelado';
+
 export interface Cotizacion {
   id: string;
-  estado: 'Pendiente' | 'En revisión' | 'Contactado' | 'Finalizado' | 'Cancelado';
+  estado: EstadoCotizacion;
   nombreCliente: string;
   rutCliente: string;
   fecha: string;
   descripcion: string;
-  responsableId?: string; 
+  responsable: string; 
 }
