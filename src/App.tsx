@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Link, Navigate } from 'react-router-dom';
 import GestionUsuarios from './pages/GestionUsuarios';
 import GestionCotizaciones from './pages/GestionCotizaciones'; // <-- Importamos la nueva página
+import GestionProyectos from './pages/GestionProyectos'; // <-- Módulo de Proyectos
+import GestionNoticias from './pages/GestionNoticias'; // <-- Módulo de Noticias
 import Login from './pages/Login';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
@@ -37,6 +39,14 @@ const NavBar = () => {
         {/* REQUERIMIENTO: Botón en Navbar para acceder al nuevo módulo de Cotizaciones */}
         {usuarioActual.rol === 'Administrador' && (
           <Link to="/cotizaciones" style={{ color: 'white', textDecoration: 'none', alignSelf: 'center' }}>Gestión Cotizaciones</Link>
+        )}
+
+        {/* Módulo de Proyectos y Noticias */}
+        {usuarioActual.rol === 'Administrador' && (
+          <Link to="/proyectos" style={{ color: 'white', textDecoration: 'none', alignSelf: 'center' }}>Gestión Proyectos</Link>
+        )}
+        {usuarioActual.rol === 'Administrador' && (
+          <Link to="/noticias" style={{ color: 'white', textDecoration: 'none', alignSelf: 'center' }}>Gestión Noticias</Link>
         )}
       </div>
 
@@ -93,6 +103,24 @@ function App() {
                 <GestionCotizaciones />
               </RutaProtegida>
             } 
+          />
+
+          {/* Módulo de Protegidas de Proyectos y Noticias */}
+          <Route
+            path="/proyectos"
+            element={
+              <RutaProtegida>
+                <GestionProyectos />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/noticias"
+            element={
+              <RutaProtegida>
+                <GestionNoticias />
+              </RutaProtegida>
+            }
           />
         </Routes>
       </BrowserRouter>
