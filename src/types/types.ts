@@ -40,7 +40,6 @@ export interface Cotizacion {
   id: string;
   estado: EstadoCotizacion;
   nombreCliente: string;
-  rutCliente: string;
   fecha: string;
   descripcion: string;
   responsable: string; 
