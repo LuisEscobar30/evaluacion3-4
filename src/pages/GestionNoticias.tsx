@@ -271,6 +271,7 @@ export default function GestionNoticias() {
             <th style={{ padding: '10px' }}>Fecha</th>
             <th style={{ padding: '10px' }}>Título</th>
             <th style={{ padding: '10px' }}>Contenido</th>
+            <th style={{ padding: '10px' }}>Imágenes</th>
             <th style={{ padding: '10px' }}>Autor</th>
             <th style={{ padding: '10px' }}>Proyecto Relacionado</th>
             <th style={{ padding: '10px' }}>Acciones</th>
@@ -283,6 +284,16 @@ export default function GestionNoticias() {
               <td style={{ padding: '10px' }}>{n.titulo}</td>
               <td style={{ padding: '10px' }}>
                 {n.contenido.length > 60 ? `${n.contenido.slice(0, 60)}...` : n.contenido}
+              </td>
+              <td style={{ padding: '10px' }}>
+                {n.imagenes.length > 0 ? (
+                  <span>
+                    <img src={n.imagenes[0]} alt={n.titulo} style={{ width: '40px', height: '40px', objectFit: 'cover', verticalAlign: 'middle', marginRight: '6px', borderRadius: '4px' }} onError={e => (e.currentTarget.style.display = 'none')} />
+                    {n.imagenes.length > 1 ? `+${n.imagenes.length - 1} más` : ''}
+                  </span>
+                ) : (
+                  <span style={{ color: '#999' }}>Sin imagen</span>
+                )}
               </td>
               <td style={{ padding: '10px' }}>{n.autor}</td>
               <td style={{ padding: '10px' }}>{n.proyectoRelacionado || <span style={{ color: '#999' }}>—</span>}</td>
@@ -297,7 +308,7 @@ export default function GestionNoticias() {
           ))}
           {noticiasFiltradas.length === 0 && (
             <tr>
-              <td colSpan={6} style={{ textAlign: 'center', padding: '20px' }}>No se encontraron noticias.</td>
+              <td colSpan={7} style={{ textAlign: 'center', padding: '20px' }}>No se encontraron noticias.</td>
             </tr>
           )}
         </tbody>

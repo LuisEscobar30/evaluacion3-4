@@ -1,8 +1,11 @@
 import { BrowserRouter, Routes, Route, Link, Navigate } from 'react-router-dom';
 import GestionUsuarios from './pages/GestionUsuarios';
 import GestionCotizaciones from './pages/GestionCotizaciones'; // <-- Importamos la nueva página
-import GestionProyectos from './pages/GestionProyectos'; // <-- Módulo de Proyectos
-import GestionNoticias from './pages/GestionNoticias'; // <-- Módulo de Noticias
+import GestionProyectos from './pages/GestionProyectos'; // <-- Módulo de Luis: Proyectos
+import GestionNoticias from './pages/GestionNoticias'; // <-- Módulo de Luis: Noticias
+import Inicio from './pages/Inicio'; // <-- Pantalla de inicio con noticias y proyectos
+import DetalleProyecto from './pages/DetalleProyecto'; // <-- Detalle de un proyecto
+import DetalleNoticia from './pages/DetalleNoticia'; // <-- Detalle de una noticia
 import Login from './pages/Login';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
@@ -41,7 +44,7 @@ const NavBar = () => {
           <Link to="/cotizaciones" style={{ color: 'white', textDecoration: 'none', alignSelf: 'center' }}>Gestión Cotizaciones</Link>
         )}
 
-        {/* Módulo de Proyectos y Noticias */}
+        {/* Módulo Proyectos y Noticias */}
         {usuarioActual.rol === 'Administrador' && (
           <Link to="/proyectos" style={{ color: 'white', textDecoration: 'none', alignSelf: 'center' }}>Gestión Proyectos</Link>
         )}
@@ -83,7 +86,7 @@ function App() {
             path="/" 
             element={
               <RutaProtegida>
-                <h1 style={{ padding: '20px' }}>Bienvenido al Panel de Administración</h1>
+                <Inicio />
               </RutaProtegida>
             } 
           />
@@ -105,7 +108,7 @@ function App() {
             } 
           />
 
-          {/* Módulo de Protegidas de Proyectos y Noticias */}
+          {/* Módulo de Rutas Protegidas de Proyectos y Noticias */}
           <Route
             path="/proyectos"
             element={
@@ -119,6 +122,24 @@ function App() {
             element={
               <RutaProtegida>
                 <GestionNoticias />
+              </RutaProtegida>
+            }
+          />
+
+          {/* Páginas de detalle: se abren al hacer clic en una tarjeta desde Inicio */}
+          <Route
+            path="/proyectos/:id"
+            element={
+              <RutaProtegida>
+                <DetalleProyecto />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/noticias/:id"
+            element={
+              <RutaProtegida>
+                <DetalleNoticia />
               </RutaProtegida>
             }
           />
