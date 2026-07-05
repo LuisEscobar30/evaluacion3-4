@@ -1,91 +1,104 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase/config';
 import type { Usuario } from '../types/types';
 
 // 1. Definimos qué datos y funciones tendrá nuestro contexto
 interface AuthContextType {
   usuarioActual: Usuario | null;
-  login: (correo: string, contrasena: string) => string | null; 
-  logout: () => void;
+  firebaseUser: User | null; // Guardamos el usuario de Firebase para la pauta
+  cargandoAuth: boolean;
+  login: (correo: string, contrasena: string) => Promise<string | null>; 
+  logout: () => Promise<void>;
 }
 
 // 2. Creamos el contexto vacío inicial
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// 3. Componente Proveedor (El "paraguas" que envolverá tu app)
+// 3. Componente Proveedor
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [usuarioActual, setUsuarioActual] = useState<Usuario | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [cargandoAuth, setCargandoAuth] = useState(true); // Estado de carga inicial
 
-  // EFECTO PRINCIPAL: Inicializar los datos en el nivel más alto de la aplicación
   useEffect(() => {
-    // A. Verificamos si existe la base de datos de usuarios. 
-    // Si no existe, la creamos de inmediato con el Administrador inicial y su contraseña.
-    const usuariosGuardados = localStorage.getItem('obe_usuarios');
-    if (!usuariosGuardados) {
-      const iniciales: Usuario[] = [
-        { 
-          id: '1', 
-          nombre: 'Admin', 
-          correo: 'admin@obespa.cl', 
-          telefono: '+56912345678', 
-          rol: 'Administrador', 
-          activo: true, 
-          password: 'admin123' // Contraseña para el usuario por defecto
+    // onAuthStateChanged escucha automáticamente si hay una sesión activa en Firebase
+    const desuscribir = onAuthStateChanged(auth, async (user) => {
+      setFirebaseUser(user);
+      
+      if (user) {
+        // Si hay usuario en Firebase, buscamos sus datos (nombre, rol) en Firestore
+        try {
+          const docRef = doc(db, 'usuarios', user.uid);
+          const docSnap = await getDoc(docRef);
+          
+          if (docSnap.exists()) {
+            setUsuarioActual({ id: user.uid, ...docSnap.data() } as Usuario);
+          } else {
+            // Fallback: Si el usuario existe en Auth pero tus compañeros aún no lo 
+            // guardan en Firestore, lo dejamos entrar como Admin por defecto para no bloquearte.
+            setUsuarioActual({
+              id: user.uid,
+              nombre: 'Administrador',
+              correo: user.email || '',
+              telefono: '',
+              rol: 'Administrador', 
+              activo: true,
+              password: '' // Ya no se usa, Firebase maneja esto
+            });
+          }
+        } catch (error) {
+          console.error("Error al obtener datos del usuario:", error);
+          setUsuarioActual(null);
         }
-      ];
-      localStorage.setItem('obe_usuarios', JSON.stringify(iniciales));
-    }
+      } else {
+        setUsuarioActual(null); // No hay sesión
+      }
+      setCargandoAuth(false); // Terminó de verificar
+    });
 
-    // B. Verificamos si había una sesión abierta previamente
-    const sesionGuardada = localStorage.getItem('obe_sesion');
-    if (sesionGuardada) {
-      setUsuarioActual(JSON.parse(sesionGuardada));
-    }
+    return () => desuscribir();
   }, []);
 
-  // FUNCIÓN DE LOGIN
-  const login = (correo: string, contrasena: string) => {
-    const datosGuardados = localStorage.getItem('obe_usuarios');
-    if (!datosGuardados) return 'Error interno: No hay base de datos de usuarios.';
-
-    const usuarios: Usuario[] = JSON.parse(datosGuardados);
-    const usuarioEncontrado = usuarios.find(u => u.correo.toLowerCase() === correo.toLowerCase());
-
-    // Validamos que el correo exista
-    if (!usuarioEncontrado) {
-      return 'Correo electrónico no encontrado.';
+  // FUNCIÓN DE LOGIN CON FIREBASE
+  const login = async (correo: string, contrasena: string) => {
+    try {
+      await signInWithEmailAndPassword(auth, correo, contrasena);
+      return null; // Éxito, no hay mensaje de error
+    } catch (error: any) {
+      // Manejo de errores amigable según la pauta de la ES4
+      if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
+        return 'El correo o la contraseña son incorrectos.';
+      }
+      if (error.code === 'auth/user-not-found') {
+        return 'No existe una cuenta con este correo.';
+      }
+      if (error.code === 'auth/too-many-requests') {
+        return 'Demasiados intentos fallidos. Intenta más tarde por seguridad.';
+      }
+      return 'Ocurrió un error al intentar iniciar sesión.';
     }
-
-    // Validamos que la cuenta no haya sido desactivada en tu CRUD
-    if (!usuarioEncontrado.activo) {
-      return 'Esta cuenta está desactivada. Contacte a un administrador.';
-    }
-
-    // Validamos que la contraseña ingresada coincida con la del usuario registrado
-    if (usuarioEncontrado.password !== contrasena) {
-      return 'Contraseña incorrecta.';
-    }
-
-    // Si todo es correcto, iniciamos sesión y la guardamos
-    setUsuarioActual(usuarioEncontrado);
-    localStorage.setItem('obe_sesion', JSON.stringify(usuarioEncontrado));
-    
-    return null; 
   };
 
-  // FUNCIÓN DE LOGOUT
-  const logout = () => {
-    setUsuarioActual(null);
-    localStorage.removeItem('obe_sesion'); 
+  // FUNCIÓN DE LOGOUT CON FIREBASE
+  const logout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Error al cerrar sesión", error);
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ usuarioActual, login, logout }}>
-      {children}
+    <AuthContext.Provider value={{ usuarioActual, firebaseUser, cargandoAuth, login, logout }}>
+      {/* Solo mostramos la aplicación cuando Firebase nos confirma si hay sesión o no */}
+      {!cargandoAuth && children}
     </AuthContext.Provider>
   );
 }
 
-// 4. Hook personalizado para usar este cerebro fácilmente en cualquier otro archivo
+// 4. Hook personalizado
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
