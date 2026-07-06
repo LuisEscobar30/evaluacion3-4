@@ -1,4 +1,8 @@
 import { useState, useEffect } from 'react';
+import { collection, getDocs, updateDoc, deleteDoc, doc, addDoc, setDoc, query, where } from 'firebase/firestore';
+import { initializeApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
+import { db, auth } from '../firebase/config';
 import type { Cotizacion, EstadoCotizacion, Usuario } from '../types/types';
 import { useAuth } from '../context/AuthContext';
 
@@ -7,6 +11,8 @@ export default function GestionCotizaciones() {
 
   // --- ESTADOS ---
   const [cotizaciones, setCotizaciones] = useState<Cotizacion[]>([]);
+  const [clientesBD, setClientesBD] = useState<Usuario[]>([]); // Para el autocompletado
+  
   const [nombreCliente, setNombreCliente] = useState('');
   const [descripcion, setDescripcion] = useState('');
   const [estado, setEstado] = useState<EstadoCotizacion>('Pendiente');
@@ -17,22 +23,46 @@ export default function GestionCotizaciones() {
   const [idEditando, setIdEditando] = useState<string | null>(null);
   const [error, setError] = useState('');
 
-  // Estados para la ventana flotante
   const [sugerencias, setSugerencias] = useState<Usuario[]>([]);
   const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
+  
+  const [cargandoDatos, setCargandoDatos] = useState(true);
+  const [procesando, setProcesando] = useState(false);
 
-  // Cargar datos
-  useEffect(() => {
-    const datosGuardados = localStorage.getItem('obe_cotizaciones');
-    if (datosGuardados) setCotizaciones(JSON.parse(datosGuardados));
-  }, []);
+  // Cargar datos desde Firebase
+  const cargarDatos = async () => {
+    setCargandoDatos(true);
+    try {
+      // 1. Cargar Cotizaciones
+      const cotizacionesSnapshot = await getDocs(collection(db, 'cotizaciones'));
+      const listaCotizaciones: Cotizacion[] = [];
+      cotizacionesSnapshot.forEach((documento) => {
+        listaCotizaciones.push({ id: documento.id, ...documento.data() } as Cotizacion);
+      });
+      setCotizaciones(listaCotizaciones);
 
-  const guardarDatos = (nuevaLista: Cotizacion[]) => {
-    setCotizaciones(nuevaLista);
-    localStorage.setItem('obe_cotizaciones', JSON.stringify(nuevaLista));
+      // 2. Cargar Clientes (Solo con rol 'Cliente' para el autocompletado local)
+      const qClientes = query(collection(db, 'usuarios'), where('rol', '==', 'Cliente'));
+      const clientesSnapshot = await getDocs(qClientes);
+      const listaClientes: Usuario[] = [];
+      clientesSnapshot.forEach((documento) => {
+        listaClientes.push({ id: documento.id, ...documento.data() } as Usuario);
+      });
+      setClientesBD(listaClientes);
+
+    } catch (err) {
+      console.error("Error al cargar datos:", err);
+      setError("Hubo un problema al cargar la información de la base de datos.");
+    } finally {
+      setCargandoDatos(false);
+    }
   };
 
-  // --- LÓGICA DE BÚSQUEDA (Solo por Nombre) ---
+  useEffect(() => {
+    cargarDatos();
+  }, []);
+
+  // --- LÓGICA DE BÚSQUEDA ---
   const buscarCoincidencias = (texto: string) => {
     if (texto.trim().length < 2) {
       setMostrarSugerencias(false);
@@ -40,18 +70,13 @@ export default function GestionCotizaciones() {
       return;
     }
 
-    const usuariosGuardados = localStorage.getItem('obe_usuarios');
-    if (usuariosGuardados) {
-      const listaUsuarios: Usuario[] = JSON.parse(usuariosGuardados);
-      
-      // Filtramos SOLO clientes y buscamos coincidencia de nombre
-      const coincidencias = listaUsuarios
-        .filter(u => u.rol === 'Cliente')
-        .filter(c => c.nombre.toLowerCase().includes(texto.toLowerCase()));
+    // Filtramos sobre el estado local para no saturar Firestore con lecturas
+    const coincidencias = clientesBD.filter(c => 
+      c.nombre.toLowerCase().includes(texto.toLowerCase())
+    );
 
-      setSugerencias(coincidencias);
-      setMostrarSugerencias(coincidencias.length > 0);
-    }
+    setSugerencias(coincidencias);
+    setMostrarSugerencias(coincidencias.length > 0);
   };
 
   const handleChangeNombre = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -65,7 +90,7 @@ export default function GestionCotizaciones() {
   };
 
   // --- CREAR O ACTUALIZAR ---
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -74,48 +99,74 @@ export default function GestionCotizaciones() {
       return;
     }
 
-    if (idEditando) {
-      const actualizadas = cotizaciones.map(c =>
-        c.id === idEditando ? { ...c, nombreCliente, descripcion, estado, responsable } : c
-      );
-      guardarDatos(actualizadas);
-      setIdEditando(null);
-    } else {
-      const nuevaCotizacion: Cotizacion = {
-        id: crypto.randomUUID(),
-        nombreCliente,
-        descripcion,
-        estado: 'Pendiente',
-        fecha: new Date().toLocaleDateString('es-CL'),
-        responsable: 'Sin asignar'
-      };
+    setProcesando(true);
 
-      // Si el cliente no existe, lo creamos (sin RUT)
-      const usuariosGuardados = localStorage.getItem('obe_usuarios');
-      if (usuariosGuardados) {
-        const listaUsuarios: Usuario[] = JSON.parse(usuariosGuardados);
-        const clienteExiste = listaUsuarios.some(u => u.nombre.toLowerCase() === nombreCliente.toLowerCase() && u.rol === 'Cliente');
+    try {
+      if (idEditando) {
+        // Editar Cotización existente en Firestore
+        const refCotizacion = doc(db, 'cotizaciones', idEditando);
+        await updateDoc(refCotizacion, { 
+          nombreCliente, 
+          descripcion, 
+          estado, 
+          responsable 
+        });
+      } else {
+        // Validar si el cliente existe. Si no, lo creamos en Auth y Firestore
+        const clienteExiste = clientesBD.some(u => u.nombre.toLowerCase() === nombreCliente.toLowerCase());
 
         if (!clienteExiste) {
-          const nuevoUsuarioCliente: Usuario = {
-            id: crypto.randomUUID(),
-            nombre: nombreCliente,
-            correo: `${nombreCliente.toLowerCase().replace(/\s+/g, '')}@cliente.cl`,
-            telefono: '+56900000000',
-            rol: 'Cliente',
-            activo: true,
-            password: 'cliente123'
-          };
-          localStorage.setItem('obe_usuarios', JSON.stringify([...listaUsuarios, nuevoUsuarioCliente]));
-        }
-      }
-      guardarDatos([...cotizaciones, nuevaCotizacion]);
-    }
+          const nuevoCorreo = `${nombreCliente.toLowerCase().replace(/\s+/g, '')}@cliente.cl`;
+          const nuevaPass = 'cliente123';
 
-    setNombreCliente('');
-    setDescripcion('');
-    setEstado('Pendiente');
-    setResponsable('Sin asignar');
+          const appSecundaria = initializeApp(auth.app.options, 'AppSecundariaCotizaciones');
+          const authSecundario = getAuth(appSecundaria);
+
+          try {
+            const credenciales = await createUserWithEmailAndPassword(authSecundario, nuevoCorreo, nuevaPass);
+            const nuevoUid = credenciales.user.uid;
+
+            await setDoc(doc(db, 'usuarios', nuevoUid), { 
+              nombre: nombreCliente, 
+              correo: nuevoCorreo, 
+              telefono: '+56900000000', 
+              rol: 'Cliente', 
+              activo: true 
+            });
+
+            await authSecundario.signOut();
+          } catch (errorAuth) {
+            console.error("Error al crear usuario auto-generado:", errorAuth);
+            // Si el correo ya existía por alguna razón, continuamos con la cotización
+          }
+        }
+
+        // Crear nueva cotización en Firestore (omitimos el ID para que Firebase lo genere)
+        const nuevaCotizacion = {
+          nombreCliente,
+          descripcion,
+          estado: 'Pendiente',
+          fecha: new Date().toLocaleDateString('es-CL'),
+          responsable: 'Sin asignar'
+        };
+
+        await addDoc(collection(db, 'cotizaciones'), nuevaCotizacion);
+      }
+
+      // Refrescar los datos para tener los IDs correctos y limpiar formulario
+      await cargarDatos();
+      setNombreCliente('');
+      setDescripcion('');
+      setEstado('Pendiente');
+      setResponsable('Sin asignar');
+      setIdEditando(null);
+
+    } catch (err) {
+      console.error("Error al guardar la cotización:", err);
+      setError("Hubo un error al intentar guardar la cotización.");
+    } finally {
+      setProcesando(false);
+    }
   };
 
   const editarCotizacion = (c: Cotizacion) => {
@@ -128,16 +179,32 @@ export default function GestionCotizaciones() {
     setMostrarSugerencias(false);
   };
 
-  const asignarAdministradorLogueado = (id: string) => {
+  const asignarAdministradorLogueado = async (id: string) => {
     if (usuarioActual) {
-      const actualizadas = cotizaciones.map(c => c.id === id ? { ...c, responsable: usuarioActual.nombre } : c);
-      guardarDatos(actualizadas);
+      setProcesando(true);
+      try {
+        const refCotizacion = doc(db, 'cotizaciones', id);
+        await updateDoc(refCotizacion, { responsable: usuarioActual.nombre });
+        await cargarDatos();
+      } catch (err) {
+        console.error("Error al asignar responsable:", err);
+      } finally {
+        setProcesando(false);
+      }
     }
   };
 
-  const eliminarCotizacion = (id: string) => {
+  const eliminarCotizacion = async (id: string) => {
     if (window.confirm('¿Eliminar esta solicitud permanentemente?')) {
-      guardarDatos(cotizaciones.filter(c => c.id !== id));
+      setProcesando(true);
+      try {
+        await deleteDoc(doc(db, 'cotizaciones', id));
+        await cargarDatos();
+      } catch (err) {
+        console.error("Error al eliminar:", err);
+      } finally {
+        setProcesando(false);
+      }
     }
   };
 
@@ -164,13 +231,14 @@ export default function GestionCotizaciones() {
             onChange={handleChangeNombre} 
             style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} 
             autoComplete="off"
+            disabled={procesando}
           />
 
           {/* VENTANA FLOTANTE */}
           {mostrarSugerencias && (
             <div style={{
               position: 'absolute',
-              top: '40px', // Ajustado a la posición de un solo input
+              top: '40px',
               left: 0,
               right: 0,
               background: '#fff',
@@ -199,12 +267,19 @@ export default function GestionCotizaciones() {
             </div>
           )}
 
-          <textarea placeholder="Descripción de los servicios a cotizar" rows={3} value={descripcion} onChange={e => setDescripcion(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} />
+          <textarea 
+            placeholder="Descripción de los servicios a cotizar" 
+            rows={3} 
+            value={descripcion} 
+            onChange={e => setDescripcion(e.target.value)} 
+            style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} 
+            disabled={procesando}
+          />
 
           {idEditando && (
             <>
               <label style={{ fontWeight: 'bold', fontSize: '14px' }}>Cambiar Estado:</label>
-              <select value={estado} onChange={e => setEstado(e.target.value as EstadoCotizacion)} style={{ padding: '8px' }}>
+              <select value={estado} onChange={e => setEstado(e.target.value as EstadoCotizacion)} style={{ padding: '8px' }} disabled={procesando}>
                 <option value="Pendiente">Pendiente</option>
                 <option value="En revisión">En revisión</option>
                 <option value="Contactado">Contactado</option>
@@ -214,9 +289,15 @@ export default function GestionCotizaciones() {
             </>
           )}
 
-          <button type="submit" style={{ background: '#ff922d', color: '#000', padding: '10px', border: 'none', fontWeight: 'bold', cursor: 'pointer', borderRadius: '4px' }}>
-            {idEditando ? 'Guardar Cambios' : 'Registrar Cotización'}
+          <button type="submit" disabled={procesando} style={{ background: '#ff922d', color: '#000', padding: '10px', border: 'none', fontWeight: 'bold', cursor: procesando ? 'not-allowed' : 'pointer', borderRadius: '4px' }}>
+            {procesando ? 'Procesando...' : (idEditando ? 'Guardar Cambios' : 'Registrar Cotización')}
           </button>
+          
+          {idEditando && (
+            <button type="button" onClick={() => {setIdEditando(null); setNombreCliente(''); setDescripcion('');}} disabled={procesando} style={{ padding: '8px', marginTop: '5px', background: '#ccc', border: 'none', cursor: procesando ? 'not-allowed' : 'pointer', borderRadius: '4px' }}>
+              Cancelar Edición
+            </button>
+          )}
         </div>
       </form>
 
@@ -235,41 +316,45 @@ export default function GestionCotizaciones() {
       </div>
 
       {/* TABLA */}
-      <table border={1} style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-        <thead style={{ background: '#333', color: 'white' }}>
-          <tr>
-            <th style={{ padding: '10px' }}>Fecha</th>
-            <th style={{ padding: '10px' }}>Cliente</th>
-            <th style={{ padding: '10px' }}>Descripción</th>
-            <th style={{ padding: '10px' }}>Estado</th>
-            <th style={{ padding: '10px' }}>Responsable</th>
-            <th style={{ padding: '10px' }}>Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {cotizacionesFiltradas.map(c => (
-            <tr key={c.id}>
-              <td style={{ padding: '10px' }}>{c.fecha}</td>
-              <td style={{ padding: '10px' }}>{c.nombreCliente}</td>
-              <td style={{ padding: '10px' }}>{c.descripcion}</td>
-              <td style={{ padding: '10px' }}>
-                <span style={{ padding: '4px 8px', borderRadius: '4px', fontWeight: 'bold', fontSize: '13px', background: c.estado === 'Pendiente' ? '#fff3cd' : c.estado === 'Finalizado' ? '#d4edda' : c.estado === 'Cancelado' ? '#f8d7da' : '#d1ecf1', color: c.estado === 'Pendiente' ? '#856404' : c.estado === 'Finalizado' ? '#155724' : c.estado === 'Cancelado' ? '#721c24' : '#0c5460' }}>
-                  {c.estado}
-                </span>
-              </td>
-              <td style={{ padding: '10px' }}><strong>{c.responsable}</strong></td>
-              <td style={{ padding: '10px' }}>
-                <button onClick={() => editarCotizacion(c)} style={{ marginRight: '5px', padding: '5px 10px', cursor: 'pointer' }}>Editar</button>
-                <button onClick={() => asignarAdministradorLogueado(c.id)} style={{ marginRight: '5px', padding: '5px 10px', cursor: 'pointer', background: '#4caf50', color: 'white', border: 'none', borderRadius: '3px' }}>Asignarme</button>
-                <button onClick={() => eliminarCotizacion(c.id)} style={{ padding: '5px 10px', cursor: 'pointer', background: '#f44336', color: 'white', border: 'none', borderRadius: '3px' }}>Eliminar</button>
-              </td>
+      {cargandoDatos ? (
+        <p style={{ fontWeight: 'bold', color: '#ff922d' }}>Cargando cotizaciones desde la base de datos...</p>
+      ) : (
+        <table border={1} style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+          <thead style={{ background: '#333', color: 'white' }}>
+            <tr>
+              <th style={{ padding: '10px' }}>Fecha</th>
+              <th style={{ padding: '10px' }}>Cliente</th>
+              <th style={{ padding: '10px' }}>Descripción</th>
+              <th style={{ padding: '10px' }}>Estado</th>
+              <th style={{ padding: '10px' }}>Responsable</th>
+              <th style={{ padding: '10px' }}>Acciones</th>
             </tr>
-          ))}
-          {cotizacionesFiltradas.length === 0 && (
-            <tr><td colSpan={6} style={{ textAlign: 'center', padding: '20px' }}>No se encontraron solicitudes de cotización.</td></tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {cotizacionesFiltradas.map(c => (
+              <tr key={c.id}>
+                <td style={{ padding: '10px' }}>{c.fecha}</td>
+                <td style={{ padding: '10px' }}>{c.nombreCliente}</td>
+                <td style={{ padding: '10px' }}>{c.descripcion}</td>
+                <td style={{ padding: '10px' }}>
+                  <span style={{ padding: '4px 8px', borderRadius: '4px', fontWeight: 'bold', fontSize: '13px', background: c.estado === 'Pendiente' ? '#fff3cd' : c.estado === 'Finalizado' ? '#d4edda' : c.estado === 'Cancelado' ? '#f8d7da' : '#d1ecf1', color: c.estado === 'Pendiente' ? '#856404' : c.estado === 'Finalizado' ? '#155724' : c.estado === 'Cancelado' ? '#721c24' : '#0c5460' }}>
+                    {c.estado}
+                  </span>
+                </td>
+                <td style={{ padding: '10px' }}><strong>{c.responsable}</strong></td>
+                <td style={{ padding: '10px' }}>
+                  <button onClick={() => editarCotizacion(c)} disabled={procesando} style={{ marginRight: '5px', padding: '5px 10px', cursor: procesando ? 'not-allowed' : 'pointer' }}>Editar</button>
+                  <button onClick={() => asignarAdministradorLogueado(c.id)} disabled={procesando} style={{ marginRight: '5px', padding: '5px 10px', cursor: procesando ? 'not-allowed' : 'pointer', background: '#4caf50', color: 'white', border: 'none', borderRadius: '3px' }}>Asignarme</button>
+                  <button onClick={() => eliminarCotizacion(c.id)} disabled={procesando} style={{ padding: '5px 10px', cursor: procesando ? 'not-allowed' : 'pointer', background: '#f44336', color: 'white', border: 'none', borderRadius: '3px' }}>Eliminar</button>
+                </td>
+              </tr>
+            ))}
+            {cotizacionesFiltradas.length === 0 && (
+              <tr><td colSpan={6} style={{ textAlign: 'center', padding: '20px' }}>No se encontraron solicitudes de cotización.</td></tr>
+            )}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
