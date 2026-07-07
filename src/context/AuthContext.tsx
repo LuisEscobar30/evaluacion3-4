@@ -34,19 +34,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const docSnap = await getDoc(docRef);
           
           if (docSnap.exists()) {
-            setUsuarioActual({ id: user.uid, ...docSnap.data() } as Usuario);
+            const data = docSnap.data();
+            // NUEVO: Verificamos si la cuenta está activa
+            if (data.activo) {
+              setUsuarioActual({ id: user.uid, ...data } as Usuario);
+            } else {
+              // Si fue desactivado lógicamente, cerramos la sesión
+              await signOut(auth);
+              setUsuarioActual(null);
+            }
           } else {
-            // Fallback: Si el usuario existe en Auth pero tus compañeros aún no lo 
-            // guardan en Firestore, lo dejamos entrar como Admin por defecto para no bloquearte.
-            setUsuarioActual({
-              id: user.uid,
-              nombre: 'Administrador',
-              correo: user.email || '',
-              telefono: '',
-              rol: 'Administrador', 
-              activo: true,
-              password: '' // Ya no se usa, Firebase maneja esto
-            });
+            // NUEVO: Si no existe en Firestore (fue eliminado físicamente), cerramos la sesión.
+            // (Aquí eliminamos el "Fallback" temporal que le daba rol de Admin)
+            await signOut(auth);
+            setUsuarioActual(null);
           }
         } catch (error) {
           console.error("Error al obtener datos del usuario:", error);
@@ -64,8 +65,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // FUNCIÓN DE LOGIN CON FIREBASE
   const login = async (correo: string, contrasena: string) => {
     try {
-      await signInWithEmailAndPassword(auth, correo, contrasena);
-      return null; // Éxito, no hay mensaje de error
+      // 1. Validamos correo y contraseña con Auth
+      const credenciales = await signInWithEmailAndPassword(auth, correo, contrasena);
+      
+      // 2. NUEVO: Antes de dar luz verde, verificamos su estado en Firestore
+      const docRef = doc(db, 'usuarios', credenciales.user.uid);
+      const docSnap = await getDoc(docRef);
+      
+      if (!docSnap.exists()) {
+        await signOut(auth); // Lo echamos
+        return 'Esta cuenta fue eliminada del sistema. Contacte a soporte.';
+      }
+      
+      if (docSnap.data().activo === false) {
+        await signOut(auth); // Lo echamos
+        return 'Esta cuenta está desactivada. Contacte a un administrador.';
+      }
+
+      return null; // Éxito total, puede entrar
     } catch (error: any) {
       // Manejo de errores amigable según la pauta de la ES4
       if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
