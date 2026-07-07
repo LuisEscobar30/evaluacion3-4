@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../firebase/config';
 import type { Proyecto, Noticia } from '../types/types';
 import CarruselImagenes from '../components/CarruselImagenes';
 import { colorCategoria } from '../utils/colorCategoria';
@@ -10,14 +12,22 @@ export default function Inicio() {
   const [proyectos, setProyectos] = useState<Proyecto[]>([]);
   const [noticias, setNoticias] = useState<Noticia[]>([]);
 
-  // Esta pantalla NUNCA escribe en localStorage, solo lee lo que ya
-  // guardaron los módulos de Gestión Proyectos y Gestión Noticias.
+  // Lee desde Firestore — no desde localStorage
   useEffect(() => {
-    const proyectosGuardados = localStorage.getItem('obe_proyectos');
-    if (proyectosGuardados) setProyectos(JSON.parse(proyectosGuardados));
+    const cargarDatos = async () => {
+      try {
+        const snapProyectos = await getDocs(collection(db, 'proyectos'));
+        const listaProyectos: Proyecto[] = snapProyectos.docs.map(doc => ({ id: doc.id, ...doc.data() } as Proyecto));
+        setProyectos(listaProyectos);
 
-    const noticiasGuardadas = localStorage.getItem('obe_noticias');
-    if (noticiasGuardadas) setNoticias(JSON.parse(noticiasGuardadas));
+        const snapNoticias = await getDocs(collection(db, 'noticias'));
+        const listaNoticias: Noticia[] = snapNoticias.docs.map(doc => ({ id: doc.id, ...doc.data() } as Noticia));
+        setNoticias(listaNoticias);
+      } catch (err) {
+        console.error('Error al cargar datos en Inicio:', err);
+      }
+    };
+    cargarDatos();
   }, []);
 
   // Solo se muestran los proyectos marcados como disponibles.

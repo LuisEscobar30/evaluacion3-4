@@ -1,22 +1,33 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase/config';
 import type { Noticia } from '../types/types';
 import CarruselImagenes from '../components/CarruselImagenes';
 
 export default function DetalleNoticia() {
-  // useParams lee el ":id" que viene en la URL (definido en la ruta de App.tsx: "/noticias/:id")
   const { id } = useParams<{ id: string }>();
-
   const [noticia, setNoticia] = useState<Noticia | null>(null);
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
-    const guardadas = localStorage.getItem('obe_noticias');
-    if (guardadas) {
-      const lista: Noticia[] = JSON.parse(guardadas);
-      setNoticia(lista.find(n => n.id === id) ?? null);
-    }
-    setCargando(false);
+    const cargar = async () => {
+      try {
+        // getDoc trae UN solo documento por su id directamente
+        const docRef = doc(db, 'noticias', id!);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setNoticia({ id: docSnap.id, ...docSnap.data() } as Noticia);
+        } else {
+          setNoticia(null);
+        }
+      } catch (err) {
+        setNoticia(null);
+      } finally {
+        setCargando(false);
+      }
+    };
+    cargar();
   }, [id]);
 
   if (cargando) return null;

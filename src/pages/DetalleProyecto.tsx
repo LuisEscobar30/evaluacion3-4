@@ -1,23 +1,34 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase/config';
 import type { Proyecto } from '../types/types';
 import CarruselImagenes from '../components/CarruselImagenes';
 import { colorCategoria } from '../utils/colorCategoria';
 
 export default function DetalleProyecto() {
-  // useParams lee el ":id" que viene en la URL (definido en la ruta de App.tsx: "/proyectos/:id")
   const { id } = useParams<{ id: string }>();
-
   const [proyecto, setProyecto] = useState<Proyecto | null>(null);
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
-    const guardados = localStorage.getItem('obe_proyectos');
-    if (guardados) {
-      const lista: Proyecto[] = JSON.parse(guardados);
-      setProyecto(lista.find(p => p.id === id) ?? null);
-    }
-    setCargando(false);
+    const cargar = async () => {
+      try {
+        // getDoc trae UN solo documento por su id — más eficiente que traer todos
+        const docRef = doc(db, 'proyectos', id!);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setProyecto({ id: docSnap.id, ...docSnap.data() } as Proyecto);
+        } else {
+          setProyecto(null);
+        }
+      } catch (err) {
+        setProyecto(null);
+      } finally {
+        setCargando(false);
+      }
+    };
+    cargar();
   }, [id]);
 
   // Mientras se lee localStorage, no mostramos nada todavía (es instantáneo,
